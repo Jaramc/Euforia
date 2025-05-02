@@ -1,46 +1,86 @@
-import React, { createContext, useState, useEffect, useContext } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from '../services/firebaseConfig';
+"use client"
 
-// Primero define el contexto
-const AuthContext = createContext(null);
+import { createContext, useState, useContext, useEffect } from "react"
+import { auth } from "../services/firebaseConfig"
+import { onAuthStateChanged, signOut } from "firebase/auth"
+import AsyncStorage from "@react-native-async-storage/async-storage"
 
+// Crear el contexto de autenticación
+export const AuthContext = createContext()
+
+// Proveedor del contexto de autenticación
 export const AuthProvider = ({ children }) => {
-    const [user, setUser] = useState(null);
-    const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null)
+  const [userType, setUserType] = useState(null) // "consumer" o "model"
+  const [loading, setLoading] = useState(true)
 
-    useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-            setUser(currentUser);
-            setLoading(false); // Actualiza el estado de carga cuando se completa la verificación
-        });
-        return () => unsubscribe();
-    }, []);
+  // Efecto para verificar el estado de autenticación al cargar la app
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser)
 
-    // Proporciona un valor para el contexto que incluye el usuario, setUser y loading
-    const value = {
-        user,
-        setUser,
-        loading
-    };
+        // Recuperar el tipo de usuario de AsyncStorage
+        try {
+          const storedUserType = await AsyncStorage.getItem("userType")
+          console.log("Tipo de usuario recuperado:", storedUserType)
 
-    // Opcionalmente, puedes mostrar un indicador de carga mientras se verifica la autenticación
-    if (loading) {
-        return null; // O un componente de carga como <LoadingSpinner />
+          if (storedUserType) {
+            setUserType(storedUserType)
+          } else {
+            // Si no hay tipo guardado, asumimos que es consumidor por defecto
+            console.log("No se encontró tipo de usuario, usando valor por defecto: consumer")
+            setUserType("consumer")
+          }
+        } catch (error) {
+          console.error("Error al recuperar el tipo de usuario:", error)
+          setUserType("consumer") // Valor por defecto
+        }
+      } else {
+        setUser(null)
+        setUserType(null)
+      }
+      setLoading(false)
+    })
+
+    return () => unsubscribe()
+  }, [])
+
+  // Función para guardar el tipo de usuario
+  const saveUserType = async (type) => {
+    try {
+      await AsyncStorage.setItem("userType", type)
+      setUserType(type)
+    } catch (error) {
+      console.error("Error al guardar el tipo de usuario:", error)
     }
+  }
 
-    return (
-        <AuthContext.Provider value={value}>
-            {children}
-        </AuthContext.Provider>
-    );
+  // Función para cerrar sesión
+  const logout = async () => {
+    try {
+      await signOut(auth)
+      await AsyncStorage.removeItem("userType") // Limpiar el tipo de usuario al cerrar sesión
+      setUser(null)
+      setUserType(null)
+    } catch (error) {
+      console.error("Error al cerrar sesión:", error)
+    }
+  }
+
+  // Valor del contexto
+  const value = {
+    user,
+    userType,
+    loading,
+    saveUserType,
+    logout,
+  }
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
-// Define el hook después de crear el contexto
+// Hook personalizado para usar el contexto de autenticación
 export const useAuth = () => {
-    const context = useContext(AuthContext);
-    if (context === undefined) {
-        throw new Error('useAuth debe ser usado dentro de un AuthProvider');
-    }
-    return context;
-};
+  return useContext(AuthContext)
+}
